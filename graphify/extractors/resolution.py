@@ -1625,10 +1625,15 @@ def _parse_js_tree(path: Path):
                 path.read_text(encoding="utf-8", errors="replace")
             )
             source = masked.encode("utf-8")
+        elif path.suffix == ".svelte":
+            masked, vue_lang = _vue_mask_non_script(
+                path.read_text(encoding="utf-8", errors="replace")
+            )
+            source = masked.encode("utf-8")
         else:
             source = path.read_bytes()
         use_ts = path.suffix in (".ts", ".mts", ".cts") or (
-            path.suffix == ".vue" and vue_lang not in ("js", "jsx")
+            path.suffix in (".vue", ".svelte") and vue_lang not in ("js", "jsx")
         )
         if path.suffix == ".tsx":
             # .tsx must use the JSX-aware TSX grammar, mirroring the engine's

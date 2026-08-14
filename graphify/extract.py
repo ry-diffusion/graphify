@@ -2366,7 +2366,31 @@ def extract_svelte(path: Path) -> dict:
     {#await import('./X.svelte')} lives in the markup layer and is invisible
     to the JS parser, so a regex pass covers those dynamic imports.
     """
-    result = _extract_generic(path, _JS_CONFIG)
+    # Mask the markup so the <script> block reaches the AST
+    # pass. Without this the raw .svelte file makes the JS grammar error at the
+    # first tag, and only the regex rescue below contributes anything.
+    try:
+        _svelte_src = path.read_text(encoding="utf-8", errors="replace")
+        _masked, _svelte_lang = _vue_mask_non_script(_svelte_src)
+        if _svelte_lang == "tsx":
+            _svelte_config = _TSX_CONFIG
+        elif _svelte_lang in ("js", "jsx"):
+            _svelte_config = _JS_CONFIG
+        else:  # "ts" or unspecified — TS is a superset of JS, safe default
+            _svelte_config = _TS_CONFIG
+        _masked_bytes = _masked.encode("utf-8")
+        if _svelte_config is not _JS_CONFIG:
+            # Same normalization the .vue/.astro TS paths apply: `import type`
+            # / `export type *` otherwise leave ERROR nodes in the TS grammar
+            # and the script degrades to a partial parse (#3928, #3942).
+            _masked_bytes = _normalize_ts_import_types(
+                _masked_bytes, tsx=_svelte_config is _TSX_CONFIG
+            ) or _masked_bytes
+        result = _extract_generic(
+            path, _svelte_config, source_override=_masked_bytes
+        )
+    except Exception:
+        result = _extract_generic(path, _JS_CONFIG)
     try:
         import re as _re
         src = path.read_text(encoding="utf-8", errors="replace")
