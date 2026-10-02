@@ -153,12 +153,23 @@ end
 # ── resolution level ───────────────────────────────────────────────────────────
 
 
-def test_resolver_disabled_without_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GRAPHIFY_ELIXIR_REMOTE_CALLS", raising=False)
+@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+def test_resolver_disabled_by_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("GRAPHIFY_ELIXIR_REMOTE_CALLS", value)
     _write(tmp_path, "channels.ex", CHANNELS_EX)
     test_file = _write(tmp_path, "channels_test.exs", CHANNELS_TEST_EXS)
     graph = extract([test_file, tmp_path / "channels.ex"], cache_root=tmp_path, parallel=False)
     assert _has_call_edge(graph, "ChannelsTest", "create_channel") is None
+
+
+def test_resolver_enabled_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # On by default in this fork: the git hooks and the agents that
+    # rebuild the graph never set the variable, so opt-in meant never.
+    monkeypatch.delenv("GRAPHIFY_ELIXIR_REMOTE_CALLS", raising=False)
+    _write(tmp_path, "channels.ex", CHANNELS_EX)
+    test_file = _write(tmp_path, "channels_test.exs", CHANNELS_TEST_EXS)
+    graph = extract([test_file, tmp_path / "channels.ex"], cache_root=tmp_path, parallel=False)
+    assert _has_call_edge(graph, "ChannelsTest", "create_channel") is not None
 
 
 def test_resolves_aliased_remote_call_from_spec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

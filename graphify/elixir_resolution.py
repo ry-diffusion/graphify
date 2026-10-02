@@ -22,10 +22,11 @@ source, so resolution is by explicit reference, never by global bare-name
 matching. The shared cross-file call pass skips all member calls, so this
 pass is purely additive.
 
-Opt-in via ``GRAPHIFY_ELIXIR_REMOTE_CALLS=1``: ExUnit spec bodies contribute
+On by default (``GRAPHIFY_ELIXIR_REMOTE_CALLS=0`` turns it off): ExUnit spec bodies contribute
 most of these raw_calls (``test``/``describe``/``setup`` blocks), and the
 resulting spec -> module coverage edges roughly double an Elixir corpus's
-edge count. Gated so existing users see no graph change until they opt in.
+edge count. Upstream gated it so existing users saw no change; this fork
+turns it on because a gate nobody sets is a resolver that never runs.
 Registered into graphify.resolver_registry and run by extract() after id
 disambiguation, so node ids and raw_call caller_nids are final.
 """
@@ -77,8 +78,11 @@ def _key(label: str) -> str:
 
 
 def _enabled() -> bool:
+    # On by default in this fork (upstream PR #2717 had it opt-in): the
+    # git hooks and agents that rebuild a graph never set the variable, so
+    # opt-in meant the resolver never ran. 0/false/no/off turns it off.
     raw = os.environ.get("GRAPHIFY_ELIXIR_REMOTE_CALLS", "").strip().lower()
-    return raw in ("1", "true", "yes")
+    return raw not in ("0", "false", "no", "off")
 
 
 def resolve_elixir_remote_calls(
@@ -88,7 +92,7 @@ def resolve_elixir_remote_calls(
 ) -> None:
     """Resolve Elixir ``Module.function()`` raw_calls to cross-file edges.
 
-    No-op unless GRAPHIFY_ELIXIR_REMOTE_CALLS is set. Mutates ``all_edges``
+    No-op when GRAPHIFY_ELIXIR_REMOTE_CALLS=0. Mutates ``all_edges``
     in place, matching the other registry resolvers.
     """
     if not _enabled():
