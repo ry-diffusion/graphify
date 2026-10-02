@@ -5650,13 +5650,12 @@ register_language_resolver(
         resolve_erlang_remote_calls,
     )
 )
-register_language_resolver(
-    LanguageResolver(
-        "elixir_import_targets",
-        frozenset({".ex", ".exs"}),
-        _resolve_elixir_import_targets,
-    )
+_ELIXIR_IMPORT_TARGET_RESOLVER = LanguageResolver(
+    "elixir_import_targets",
+    frozenset({".ex", ".exs"}),
+    _resolve_elixir_import_targets,
 )
+register_language_resolver(_ELIXIR_IMPORT_TARGET_RESOLVER)
 # Pascal/Delphi cross-file inherited-method-call resolution: a call from a
 # manual descendant class to a method it inherits from an ancestor declared
 # in a DIFFERENT file (the common generated-base/manual-descendant split,
@@ -8292,7 +8291,11 @@ def extract(
     # tail registry run (run_language_resolvers below) would be too late.
     run_language_resolvers(
         paths, per_file, all_nodes, all_edges,
-        resolvers=[_KOTLIN_IMPORT_TARGET_RESOLVER],
+        # Elixir too: its import/alias/use edges must point at the real module
+        # node before the evidence index is built, or no bare Elixir call can
+        # ever show import evidence. Idempotent — the tail registry run skips
+        # an edge whose target already resolves.
+        resolvers=[_KOTLIN_IMPORT_TARGET_RESOLVER, _ELIXIR_IMPORT_TARGET_RESOLVER],
     )
 
     # Build evidence index from import edges so cross-file calls backed by an
@@ -8359,6 +8362,7 @@ def extract(
     # of these files with no import evidence is gated below (#1659).
     _JS_TS_CALL_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
     _go_module_cache: dict[Path, str | None] = {}
+    _elixir_owner: dict[str, str] | None = None
     for rc in all_raw_calls:
         if rc.get("_ambiguous_python_import"):
             continue
@@ -8462,7 +8466,28 @@ def extract(
                 or (candidate_file_nid is not None and candidate_file_nid in imported_modules)
             )
 
-        if len(candidates) == 1:
+        if str(rc.get("source_file", "")).endswith((".ex", ".exs")):
+            # Elixir: an unqualified call is the caller's own module (resolved
+            # in-file), a module the file `import`s/`use`s, or Kernel/a library.
+            # Its `imports` edges point at the MODULE node, not the file, so the
+            # file-based evidence check above never matches, and a single
+            # same-named def anywhere was taken as the target: every Ecto
+            # `count(e.id)` and every `json(conn, _)` from `use Phoenix.Controller`
+            # landed on an unrelated module's `count/1` / `json/2`. Keep only
+            # candidates whose owning module the caller's file imports — Elixir
+            # import edges are `imports` (symbol-shaped), so they sit in
+            # imported_symbols.
+            if _elixir_owner is None:
+                _elixir_owner = {
+                    e["target"]: e["source"] for e in all_edges if e.get("relation") == "method"
+                }
+            elixir_imported = imported_symbols | imported_modules
+            owned = [c for c in candidates if _elixir_owner.get(c) in elixir_imported]
+            if len(owned) != 1:
+                continue
+            tgt = owned[0]
+            has_import_evidence = True
+        elif len(candidates) == 1:
             tgt = candidates[0]
             has_import_evidence = go_exact_import or _has_import_evidence(tgt)
         else:
